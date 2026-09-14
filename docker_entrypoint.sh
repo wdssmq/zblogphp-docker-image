@@ -1,4 +1,6 @@
 #!/bin/bash
+ENV DOCKER_UID=1000
+ENV DOCKER_GID=1000
 set -e
 cd /app
 
@@ -14,15 +16,35 @@ if [ ! -e /app/zb_users/c_option.php ]; then
     fi
 fi
 
+# 下载带重试
+download_with_retry() {
+    local max_retries=3
+    local count=0
+    while [ $count -lt $max_retries ]; do
+        if wget "$@"; then
+            return 0
+        fi
+        count=$((count + 1))
+        sleep 5
+    done
+    return 1
+}
+
 ## Download Z-BlogPHP
 # ZC_INSTALL_NAME 由 Dockerfile 内定义
 if ! [ -e /app/index.php ]; then
     echo Downloading Z-BlogPHP...
-    wget https://update.zblogcn.com/zip/$ZC_INSTALL_NAME.zip
+    download_with_retry https://update.zblogcn.com/zip/$ZC_INSTALL_NAME.zip
     echo Unpacking Z-BlogPHP...
     unzip -oq $ZC_INSTALL_NAME.zip
     echo Delete zip
     rm /app/$ZC_INSTALL_NAME.zip
+fi
+
+# 验证文件
+if [ ! -s /app/index.php ]; then
+    echo "Error: Failed to download Z-BlogPHP" >&2
+    exit 1
 fi
 
 # # cd /app
@@ -54,7 +76,7 @@ fi
 
 if [ "$ZC_SKIP_CHMOD" -eq "0" ]; then
     # cd /app
-    chown -R 1000:1000 /app
+    chown -R ${DOCKER_UID}:${DOCKER_GID} /app
     find ./ -type d -print|xargs chmod 755
     find ./ -type f -print|xargs chmod 644
 fi
