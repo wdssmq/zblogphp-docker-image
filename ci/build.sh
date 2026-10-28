@@ -2,7 +2,7 @@
 
 # 设置变量
 web_server=nginx
-php_vers=(7.4 8.0 8.1 8.2)
+php_vers=(8.2 8.3 8.4 8.5)
 
 # 错误检查
 set -e
@@ -26,7 +26,7 @@ docker build -t "wdssmq/zblogphp-${web_server}:latest" \
     .
 docker push "wdssmq/zblogphp-${web_server}:latest"
 
-# 这里默认 PHP 7.4，Nginx
+# 这里不传参数，使用 Dockerfile 内的默认值（Nginx + PHP 8.2）
 docker build -t "wdssmq/zblogphp:latest" .
 docker push "wdssmq/zblogphp:latest"
 

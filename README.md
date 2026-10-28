@@ -13,13 +13,15 @@ wdssmq/zbp-docker-compose: 使用 Docker Compose 快捷部署 Z-BlogPHP + MySQL�
 ## 实际可用镜像及 TAG
 
 - `wdssmq/zblogphp`
-    - `wdssmq/zblogphp:latest` - Nginx + PHP 7.4
+    - `wdssmq/zblogphp:latest` - Nginx + PHP 8.2（Dockerfile 默认）
 - `wdssmq/zblogphp-nginx`
     - `wdssmq/zblogphp-nginx:latest` - 同 8.2
+    - `wdssmq/zblogphp-nginx:8.5`    - Nginx + PHP 8.5
+    - `wdssmq/zblogphp-nginx:8.4`    - Nginx + PHP 8.4
+    - `wdssmq/zblogphp-nginx:8.3`    - Nginx + PHP 8.3
     - `wdssmq/zblogphp-nginx:8.2`    - Nginx + PHP 8.2
-    - `wdssmq/zblogphp-nginx:8.1`    - Nginx + PHP 8.1
-    - `wdssmq/zblogphp-nginx:8.0`    - Nginx + PHP 8.0
-    - `wdssmq/zblogphp-nginx:7.4`    - Nginx + PHP 7.4
+
+> PHP 7.4 / 8.0 / 8.1 已不再构建；
 
 ## 构建和调试
 
