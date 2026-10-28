@@ -13,14 +13,12 @@ COPY nginx/vhost.common.d/10-location-root.conf /opt/docker/etc/nginx/vhost.comm
 
 EXPOSE 80
 
-ENV ZC_SKIP_TC_PLUGINS 0
 ENV ZC_SKIP_CHMOD 0
-ENV ZC_INSTALL_NAME Z-BlogPHP_1_7_3_3290_Finch
+# 安装包需包含 CLI 安装器 zb_install/cli.php（1.7.5.3550 及以上）
+ENV ZC_INSTALL_URL https://github.com/zblogcn/zblogphp/releases/download/v1.7.5.3550/zblogphp-1.7.5.3550.zip
+ENV ZC_INSTALL_NAME ""
 
-# ADD install-docker.php /app/install-docker.php
-# ADD install-docker-plugins.php /app/install-docker-plugins.php
-
-COPY install-docker.php /root/install-docker.php
-COPY install-docker-plugins.php /root/install-docker-plugins.php
+# zba_toolkit.php 来自 Z-BlogPHP 仓库的 utils/zba_toolkit.php（发布包中不含该目录）
+COPY utils/zba_toolkit.php /root/zba_toolkit.php
 
 COPY docker_entrypoint.sh /entrypoint.d

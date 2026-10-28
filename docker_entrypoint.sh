@@ -1,22 +1,57 @@
 #!/bin/bash
+# Z-BlogPHP 容器初始化：
+#   1. 下载并解压 Z-BlogPHP
+#   2. 使用 Z-BlogPHP 自带的 CLI 安装器 (zb_install/cli.php) 完成安装
+#   3. 使用 zba_toolkit.php (CLI) 安装应用中心
+#   4. 清理安装目录并修正权限
+
 DOCKER_UID=${DOCKER_UID:-1000}
 DOCKER_GID=${DOCKER_GID:-1000}
+
 set -e
+
 cd /app
 
-if [ ! -e /app/zb_users/c_option.php ]; then
-    if [ ! -d /app/zb_install ]; then
-        rm -f /app/index.php
-    fi
-    if [ ! -e /app/install-docker.php ]; then
-        cp /root/install-docker.php /app/install-docker.php
-    fi
-    if [ ! -e /app/install-docker-plugins.php ]; then
-        cp /root/install-docker-plugins.php /app/install-docker-plugins.php
-    fi
-fi
+# ---------- 环境变量默认值 ----------
 
-# 下载带重试
+# 数据库（参数与 zb_install/cli.php 一致）
+ZC_DB_TYPE=${ZC_DB_TYPE:-mysqli}
+ZC_DB_HOST=${ZC_DB_HOST:-localhost}
+ZC_DB_PORT=${ZC_DB_PORT:-}
+ZC_DB_USER=${ZC_DB_USER:-root}
+ZC_DB_PWDD=${ZC_DB_PWDD:-}
+ZC_DB_PREFIX=${ZC_DB_PREFIX:-zbp_}
+ZC_DB_ENGINE=${ZC_DB_ENGINE:-MyISAM}
+# SQLite 时留空，由 cli.php 自动生成数据库文件名
+case "$ZC_DB_TYPE" in
+    sqlite | sqlite3 | pdo_sqlite) ZC_DB_NAME=${ZC_DB_NAME:-} ;;
+    *) ZC_DB_NAME=${ZC_DB_NAME:-zblog_docker} ;;
+esac
+
+# 站点和管理员（密码不设默认值）
+ZC_BLOG_NAME=${ZC_BLOG_NAME:-又一个 Z-BLOG 站点}
+ZC_BLOG_USER=${ZC_BLOG_USER:-zblog_user}
+# 格式：主题|样式，如 default|default、tpure|style
+ZC_BLOG_THEME=${ZC_BLOG_THEME:-tpure|style}
+
+# 安装包：ZC_INSTALL_URL 为完整地址，ZC_INSTALL_NAME 对应 update.zblogcn.com/zip/<名称>.zip
+ZC_INSTALL_URL=${ZC_INSTALL_URL:-https://github.com/zblogcn/zblogphp/releases/download/v1.7.5.3550/zblogphp-1.7.5.3550.zip}
+ZC_INSTALL_NAME=${ZC_INSTALL_NAME:-}
+
+ZC_SKIP_CHMOD=${ZC_SKIP_CHMOD:-0}
+
+# 预装应用：以 | 分隔的名称，对应 ZC_APP_URLS 里的下载地址
+# 默认不执行（ZC_APPS_AUTO=0），仅保留接口，将来需要时再打开
+ZC_APPS=${ZC_APPS:-AppCentre}
+ZC_APPS_AUTO=${ZC_APPS_AUTO:-0}
+ZC_TOOLKIT=${ZC_TOOLKIT:-/root/zba_toolkit.php}
+
+declare -A ZC_APP_URLS=(
+    [AppCentre]="https://app.zblogcn.com/?zba=231"
+)
+
+# ---------- 下载（带重试） ----------
+
 download_with_retry() {
     local max_retries=3
     local count=0
@@ -30,15 +65,28 @@ download_with_retry() {
     return 1
 }
 
-## Download Z-BlogPHP
-# ZC_INSTALL_NAME 由 Dockerfile 内定义
-if ! [ -e /app/index.php ]; then
+# ---------- 下载并解压 Z-BlogPHP ----------
+
+if [ ! -s /app/index.php ] || [ ! -d /app/zb_system ]; then
+    rm -f /app/index.php
+
+    if [ -n "$ZC_INSTALL_NAME" ]; then
+        package_url="https://update.zblogcn.com/zip/${ZC_INSTALL_NAME}.zip"
+    else
+        package_url="$ZC_INSTALL_URL"
+    fi
+
     echo Downloading Z-BlogPHP...
-    download_with_retry https://update.zblogcn.com/zip/$ZC_INSTALL_NAME.zip
+    if ! download_with_retry -O /app/zblogphp-package.zip "$package_url"; then
+        echo "Error: Failed to download Z-BlogPHP: ${package_url}" >&2
+        rm -f /app/zblogphp-package.zip
+        exit 1
+    fi
+
     echo Unpacking Z-BlogPHP...
-    unzip -oq $ZC_INSTALL_NAME.zip
+    unzip -oq /app/zblogphp-package.zip
     echo Delete zip
-    rm /app/$ZC_INSTALL_NAME.zip
+    rm -f /app/zblogphp-package.zip
 fi
 
 # 验证文件
@@ -47,39 +95,84 @@ if [ ! -s /app/index.php ]; then
     exit 1
 fi
 
-# # cd /app
-# chown -R www-data:www-data /app
-# find ./ -type d -print|xargs chmod 777
-# find ./ -type f -print|xargs chmod 777
+# ---------- 使用 CLI 安装器安装 ----------
 
-if [ ! -e /app/zb_users/c_option.php ] && [ -e /app/install-docker.php ]; then
+if [ ! -e /app/zb_users/c_option.php ]; then
     echo Installing Z-BlogPHP...
-    php /app/install-docker.php
+
+    # 管理员密码没有默认值，避免装出一个使用默认口令的站点
+    if [ -z "$ZC_BLOG_PWDD" ]; then
+        echo "Error: 必须指定管理员密码，使用 -e ZC_BLOG_PWDD=<密码>（长度 8-40）。" >&2
+        exit 1
+    fi
+
+    if [ ! -e /app/zb_install/cli.php ]; then
+        echo "Error: 当前版本没有 CLI 安装器 (zb_install/cli.php)，请改用 1.7.5.3550 及以上版本的安装包。" >&2
+        exit 1
+    fi
+
+    # 所有可选参数都使用 --key=value 形式，避免空值被当成布尔参数
+    php /app/zb_install/cli.php \
+        --db-type="$ZC_DB_TYPE" \
+        --db-server="$ZC_DB_HOST" \
+        --db-port="$ZC_DB_PORT" \
+        --db-name="$ZC_DB_NAME" \
+        --db-user="$ZC_DB_USER" \
+        --db-password="$ZC_DB_PWDD" \
+        --db-prefix="$ZC_DB_PREFIX" \
+        --db-engine="$ZC_DB_ENGINE" \
+        --site-name="$ZC_BLOG_NAME" \
+        --admin-user="$ZC_BLOG_USER" \
+        --admin-password="$ZC_BLOG_PWDD" \
+        --theme="$ZC_BLOG_THEME"
 fi
 
-if [ "$ZC_SKIP_TC_PLUGINS" -eq "0" ] && [ -e /app/install-docker-plugins.php ]; then
-    echo Updating Plugins...
-    php /app/install-docker-plugins.php
+# ---------- 安装应用中心等预装应用 ----------
+
+install_app() {
+    local name="$1"
+    local url="$2"
+    local zba_file="${app_dir}/${name}.zba"
+
+    echo "Installing ${name} ..."
+    if ! download_with_retry -O "$zba_file" "$url"; then
+        echo "Warning: Failed to download app: ${name}" >&2
+        rm -f "$zba_file"
+        return 0
+    fi
+
+    # sync：删除同名应用后重新解压，-f 用于跳过交互确认
+    php "$ZC_TOOLKIT" sync "$zba_file" /app -f
+    rm -f "$zba_file"
+}
+
+if [ "$ZC_APPS_AUTO" = "1" ] && [ -n "$ZC_APPS" ] && [ -e /app/zb_users/c_option.php ]; then
+    echo Updating Apps...
+    app_dir=$(mktemp -d)
+    IFS='|' read -r -a app_list <<<"$ZC_APPS"
+    for app_name in "${app_list[@]}"; do
+        app_url="${ZC_APP_URLS[$app_name]:-}"
+        if [ -z "$app_url" ]; then
+            echo "Warning: 未配置下载地址的应用: ${app_name}" >&2
+            continue
+        fi
+        install_app "$app_name" "$app_url"
+    done
+    rm -rf "$app_dir"
 fi
+
+# ---------- 清理安装相关文件 ----------
 
 if [ -e /app/zb_users/c_option.php ]; then
     if [ -d /app/zb_install ]; then
         rm -rf /app/zb_install
     fi
-    if [ -e /app/install-docker.php ]; then
-        rm /app/install-docker.php
-    fi
-    if [ -e /app/install-docker-plugins.php ]; then
-        rm /app/install-docker-plugins.php
-    fi
 fi
 
-if [ "$ZC_SKIP_CHMOD" -eq "0" ]; then
-    # cd /app
+# ---------- 权限 ----------
+
+if [ "$ZC_SKIP_CHMOD" = "0" ]; then
     chown -R ${DOCKER_UID}:${DOCKER_GID} /app
-    find ./ -type d -print|xargs chmod 755
-    find ./ -type f -print|xargs chmod 644
+    find ./ -type d -print0 | xargs -0 -r chmod 755
+    find ./ -type f -print0 | xargs -0 -r chmod 644
 fi
-
-# echo "$@"
-# exec "$@"
