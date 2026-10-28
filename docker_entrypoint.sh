@@ -22,6 +22,8 @@ ZC_DB_USER=${ZC_DB_USER:-root}
 ZC_DB_PWDD=${ZC_DB_PWDD:-}
 ZC_DB_PREFIX=${ZC_DB_PREFIX:-zbp_}
 ZC_DB_ENGINE=${ZC_DB_ENGINE:-MyISAM}
+# 安装前等待数据库端口就绪的超时秒数，0 表示不等待
+ZC_DB_WAIT_TIMEOUT=${ZC_DB_WAIT_TIMEOUT:-60}
 # SQLite 时留空，由 cli.php 自动生成数据库文件名
 case "$ZC_DB_TYPE" in
     sqlite | sqlite3 | pdo_sqlite) ZC_DB_NAME=${ZC_DB_NAME:-} ;;
@@ -95,10 +97,53 @@ if [ ! -s /app/index.php ]; then
     exit 1
 fi
 
+# ---------- 等待数据库就绪 ----------
+
+# 与 cli.php 的规则一致：端口为空时按类型取默认值，ZC_DB_HOST 也可写成 host:port
+db_host="$ZC_DB_HOST"
+db_port="$ZC_DB_PORT"
+if [ -z "$db_port" ] && [ "1" = "$(printf '%s' "$db_host" | tr -cd ':' | wc -c)" ]; then
+    db_port="${db_host##*:}"
+    db_host="${db_host%:*}"
+fi
+if [ -z "$db_port" ]; then
+    case "$ZC_DB_TYPE" in
+        postgresql | pdo_postgresql) db_port=5432 ;;
+        *) db_port=3306 ;;
+    esac
+fi
+
+wait_for_db() {
+    local timeout="$ZC_DB_WAIT_TIMEOUT"
+    local waited=0
+
+    if [ "$timeout" -le 0 ]; then
+        return 0
+    fi
+
+    echo "Waiting for database ${db_host}:${db_port} ..."
+    while [ "$waited" -lt "$timeout" ]; do
+        if timeout 2 bash -c "cat < /dev/null > /dev/tcp/${db_host}/${db_port}" 2>/dev/null; then
+            echo "Database is ready."
+            return 0
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+
+    echo "Error: 等待数据库超时 (${timeout}s): ${db_host}:${db_port}" >&2
+    return 1
+}
+
 # ---------- 使用 CLI 安装器安装 ----------
 
 if [ ! -e /app/zb_users/c_option.php ]; then
     echo Installing Z-BlogPHP...
+
+    case "$ZC_DB_TYPE" in
+        sqlite | sqlite3 | pdo_sqlite) ;;
+        *) wait_for_db ;;
+    esac
 
     # 管理员密码没有默认值，避免装出一个使用默认口令的站点
     if [ -z "$ZC_BLOG_PWDD" ]; then
