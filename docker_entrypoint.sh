@@ -42,15 +42,38 @@ ZC_INSTALL_NAME=${ZC_INSTALL_NAME:-}
 
 ZC_SKIP_CHMOD=${ZC_SKIP_CHMOD:-0}
 
-# 预装应用：以 | 分隔的名称，对应 ZC_APP_URLS 里的下载地址
-# 默认不执行（ZC_APPS_AUTO=0），仅保留接口，将来需要时再打开
-ZC_APPS=${ZC_APPS:-AppCentre}
+# 预装应用：ZC_APP_URLS_CONFIG 每行一个「名称=下载地址」
 ZC_APPS_AUTO=${ZC_APPS_AUTO:-0}
 ZC_TOOLKIT=${ZC_TOOLKIT:-/root/zba_toolkit.php}
 
-declare -A ZC_APP_URLS=(
-    [AppCentre]="https://app.zblogcn.com/?zba=231"
-)
+ZC_APP_URLS_CONFIG=${ZC_APP_URLS_CONFIG:-}
+declare -A ZC_APP_URLS=()
+app_list=()
+
+if [ -n "$ZC_APP_URLS_CONFIG" ]; then
+    # 一行一个：名称=地址，忽略空行和 # 注释
+    while IFS= read -r app_url_entry || [ -n "$app_url_entry" ]; do
+        app_url_entry="${app_url_entry%$'\r'}"
+        app_url_entry="${app_url_entry#"${app_url_entry%%[![:space:]]*}"}"
+        app_url_entry="${app_url_entry%"${app_url_entry##*[![:space:]]}"}"
+        case "$app_url_entry" in "" | "#"*) continue ;; esac
+        if [[ "$app_url_entry" != *=* ]]; then
+            echo "Error: ZC_APP_URLS_CONFIG 条目格式无效: ${app_url_entry}" >&2
+            exit 1
+        fi
+
+        app_name="${app_url_entry%%=*}"
+        app_url="${app_url_entry#*=}"
+        if [ -z "$app_name" ] || [ -z "$app_url" ]; then
+            echo "Error: ZC_APP_URLS_CONFIG 的应用名和下载地址不能为空。" >&2
+            exit 1
+        fi
+        if [ -z "${ZC_APP_URLS[$app_name]+set}" ]; then
+            app_list+=("$app_name")
+        fi
+        ZC_APP_URLS["$app_name"]="$app_url"
+    done <<<"$ZC_APP_URLS_CONFIG"
+fi
 
 # ---------- 下载（带重试） ----------
 
@@ -172,7 +195,7 @@ if [ ! -e /app/zb_users/c_option.php ]; then
         --theme="$ZC_BLOG_THEME"
 fi
 
-# ---------- 安装应用中心等预装应用 ----------
+# ---------- 安装配置的预装应用 ----------
 
 install_app() {
     local name="$1"
@@ -191,16 +214,11 @@ install_app() {
     rm -f "$zba_file"
 }
 
-if [ "$ZC_APPS_AUTO" = "1" ] && [ -n "$ZC_APPS" ] && [ -e /app/zb_users/c_option.php ]; then
+if [ "$ZC_APPS_AUTO" = "1" ] && [ "${#app_list[@]}" -gt 0 ] && [ -e /app/zb_users/c_option.php ]; then
     echo Updating Apps...
     app_dir=$(mktemp -d)
-    IFS='|' read -r -a app_list <<<"$ZC_APPS"
     for app_name in "${app_list[@]}"; do
         app_url="${ZC_APP_URLS[$app_name]:-}"
-        if [ -z "$app_url" ]; then
-            echo "Warning: 未配置下载地址的应用: ${app_name}" >&2
-            continue
-        fi
         install_app "$app_name" "$app_url"
     done
     rm -rf "$app_dir"
